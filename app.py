@@ -160,4 +160,103 @@ def analyze_submission(data):
     return company_name, deficiencies
 
 def create_deficiency_report(submission_id, company_name, deficiencies, recommendations):
-    if not os.path.exists
+    if not os.path.exists(PDF_OUTPUT_DIR):
+        os.makedirs(PDF_OUTPUT_DIR)
+    pdf = PDF()
+    pdf.add_page()
+    
+    # Calculate available width for the line separator
+    effective_page_width = pdf.w - pdf.l_margin - pdf.r_margin
+
+    pdf.chapter_title(f"Company: {company_name}")
+    pdf.chapter_title(f"Submission ID: {submission_id}")
+    report_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    pdf.chapter_title(f"Report Date: {report_date}")
+    pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + effective_page_width, pdf.get_y())
+    pdf.ln(10)
+    if deficiencies:
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, f"Found {len(deficiencies)} Deficiencies", 0, 1, 'L')
+        pdf.ln(5)
+        for item in deficiencies:
+            rec_data = recommendations.get(item['question'], {
+                "action": "No specific recommendation was found.",
+                "suggestion": "N/A"
+            })
+            pdf.add_deficiency(item['question'], item['answer'], rec_data['action'], rec_data['suggestion'])
+    else:
+        pdf.set_font('Arial', 'B', 14)
+        pdf.set_text_color(0, 128, 0)
+        pdf.cell(0, 10, "No Deficiencies Found.", 0, 1, 'L')
+        pdf.set_text_color(0, 0, 0)
+    file_path = os.path.join(PDF_OUTPUT_DIR, f"deficiency_report_{submission_id}.pdf")
+    pdf.output(file_path)
+    return file_path
+
+# --- Main Webhook Endpoint ---
+@app.route('/webhook', methods=['POST'])
+def jotform_webhook():
+    try:
+        submission_data_str = request.form.get('rawRequest')
+        if not submission_data_str:
+            return jsonify({"status": "error", "message": "No rawRequest field"}), 400
+        
+        submission_data = json.loads(submission_data_str)
+        submission_id = request.form.get('submissionID', 'UNKNOWN_SID')
+        app.logger.info(f"Received submission {submission_id}")
+        company_name, deficiencies = analyze_submission(submission_data)
+        pdf_path = create_deficiency_report(submission_id, company_name, deficiencies, recommendation_map)
+        email_sent = send_pdf_email(pdf_path, company_name)
+        message = f"Report generated. Email status: {'Success' if email_sent else 'Failed'}"
+        return jsonify({"status": "success", "message": message}), 200
+    except Exception as e:
+        app.logger.error(f"An unhandled error occurred: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# --- Test Route ---
+@app.route('/test')
+def test_email():
+    app.logger.info("--- Running Test ---")
+    
+    dummy_submission_id = "DUMMY_TEST_001"
+    dummy_data = {
+        "answers": {
+            "4": {"text": "Company Name", "answer": "Test Company Inc."},
+            "5": {"text": "Are background checks performed?", "answer": "Yes"},
+            "6": {"text": "Is there a documented seal security program?", "answer": "No"},
+            "7": {"text": "Are shipping manifests verified against cargo?", "answer": "No"}
+        }
+    }
+    
+    dummy_recommendations = {
+        "Is there a documented seal security program?": {
+            "action": "Develop and implement a written seal security program that includes procedures for verifying the physical integrity of the seal upon affixing and receipt.",
+            "suggestion": "Review the C-TPAT guidelines for high-security seals (ISO 17712). Ensure all personnel handling seals are trained on recognition of compromised seals."
+        },
+        "Are shipping manifests verified against cargo?": {
+            "action": "Implement a mandatory procedure to verify that all shipping manifests, bills of lading, and other shipping documents are accurately and timely reflecting the cargo that is being loaded.",
+            "suggestion": "Consider using a two-person verification system for all outgoing shipments to ensure accuracy and accountability."
+        }
+    }
+
+    company_name, deficiencies = analyze_submission(dummy_data)
+    if not deficiencies:
+        return "Test ran, but no deficiencies were found in the dummy data."
+        
+    app.logger.info(f"Test Company: {company_name}, Deficiencies found: {len(deficiencies)}")
+    
+    pdf_path = create_deficiency_report(dummy_submission_id, company_name, deficiencies, dummy_recommendations)
+    app.logger.info(f"Test PDF generated: {pdf_path}")
+    
+    email_sent = send_pdf_email(pdf_path, company_name)
+    
+    message = f"Test complete. Report for '{company_name}' generated. Email status: {'Success' if email_sent else 'Failed'}"
+    return message
+
+# --- Root URL ---
+@app.route('/')
+def index():
+    return "Jotform PDF Generator with Email is running."
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
