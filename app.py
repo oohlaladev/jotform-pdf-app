@@ -1,14 +1,66 @@
-from flask import Flask, request, jsonify
-from fpdf import FPDF
-import json
+# app.py (version with email sending)
 import os
+import json
 import datetime
 import csv
+import smtplib
+import ssl
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from flask import Flask, request, jsonify
+from fpdf import FPDF
 
+# --- Configuration ---
 PDF_OUTPUT_DIR = "generated_reports"
 RECOMMENDATIONS_CSV = "SOD - All Deficiencies - Thomas.xlsx - Sheet1.csv"
 
+# --- Flask App Initialization ---
 app = Flask(__name__)
+
+# --- Email Sending Function ---
+def send_pdf_email(pdf_path, company_name):
+    """Sends the generated PDF as an email attachment."""
+    # Fetch email configuration securely from environment variables
+    sender_email = os.environ.get('SENDER_EMAIL')
+    sender_password = os.environ.get('SENDER_PASSWORD')
+    recipient_email = os.environ.get('RECIPIENT_EMAIL')
+
+    if not all([sender_email, sender_password, recipient_email]):
+        app.logger.error("Email configuration is missing. Cannot send email.")
+        return False
+
+    # Create the email message
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+    msg['Subject'] = f"C-TPAT Deficiency Report for {company_name}"
+
+    body = "Please find the C-TPAT Summary of Deficiencies attached."
+    msg.attach(MIMEText(body, 'plain'))
+
+    # Attach the PDF file
+    try:
+        with open(pdf_path, "rb") as f:
+            attach = MIMEApplication(f.read(), _subtype="pdf")
+        attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(pdf_path))
+        msg.attach(attach)
+    except FileNotFoundError:
+        app.logger.error(f"Could not find PDF file at {pdf_path} to attach.")
+        return False
+
+    # Send the email using Gmail's SMTP server
+    try:
+        # Using port 465 for SSL connection
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, recipient_email, msg.as_string())
+        app.logger.info(f"Email sent successfully to {recipient_email}")
+        return True
+    except Exception as e:
+        app.logger.error(f"Failed to send email: {e}")
+        return False
 
 # --- Data Loading ---
 def load_recommendations(file_path):
@@ -27,7 +79,7 @@ def load_recommendations(file_path):
                 except ValueError:
                     continue
             if not header_found:
-                print("ERROR: Could not find required headers in CSV.")
+                app.logger.error("FATAL: Could not find required headers in CSV.")
                 return {}
             for row in reader:
                 if len(row) > max(question_col_idx, action_col_idx):
@@ -36,21 +88,14 @@ def load_recommendations(file_path):
                     if question:
                         recommendation_map[question] = action
     except FileNotFoundError:
-        print(f"FATAL: The recommendations file was not found at '{file_path}'")
-        return {}
-    except Exception as e:
-        print(f"An error occurred while loading the recommendations CSV: {e}")
+        app.logger.error(f"FATAL: The recommendations file was not found at '{file_path}'")
         return {}
     return recommendation_map
 
 recommendation_map = load_recommendations(RECOMMENDATIONS_CSV)
-if recommendation_map:
-    print(f"Successfully loaded {len(recommendation_map)} recommendations.")
-else:
-    print("Warning: Recommendation map is empty.")
 
 
-# --- PDF Generation Class ---
+# --- PDF Generation Class (No changes needed) ---
 class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 12)
@@ -60,6 +105,10 @@ class PDF(FPDF):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
         self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+    def chapter_title(self, title):
+        self.set_font('Arial', 'B', 12)
+        self.cell(0, 10, title, 0, 1, 'L')
+        self.ln(5)
     def add_deficiency(self, question, answer, recommendation):
         self.set_font('Arial', 'B', 11)
         self.multi_cell(0, 7, f"Deficiency: {question}")
@@ -73,7 +122,7 @@ class PDF(FPDF):
         self.multi_cell(0, 6, recommendation)
         self.ln(6)
 
-# --- Core Functions ---
+# --- Core Functions (No changes needed) ---
 def analyze_submission(data):
     deficiencies = []
     company_name = "N/A"
@@ -96,36 +145,58 @@ def create_deficiency_report(submission_id, company_name, deficiencies, recommen
     pdf.chapter_title(f"Submission ID: {submission_id}")
     report_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     pdf.chapter_title(f"Report Date: {report_date}")
-    pdf.ln(5)
+    pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
+    pdf.ln(10)
     if deficiencies:
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, f"Found {len(deficiencies)} Deficiencies", 0, 1, 'L')
+        pdf.ln(5)
         for item in deficiencies:
             recommendation = recommendations.get(item['question'], "No specific recommendation was found in the provided CSV file.")
             pdf.add_deficiency(item['question'], item['answer'], recommendation)
     else:
         pdf.set_font('Arial', 'B', 14)
+        pdf.set_text_color(0, 128, 0)
         pdf.cell(0, 10, "No Deficiencies Found.", 0, 1, 'L')
+        pdf.set_text_color(0, 0, 0)
     file_path = os.path.join(PDF_OUTPUT_DIR, f"deficiency_report_{submission_id}.pdf")
     pdf.output(file_path)
     return file_path
 
+# --- Flask Webhook Endpoint (MODIFIED) ---
 @app.route('/webhook', methods=['POST'])
 def jotform_webhook():
     try:
-        # Jotform sends data differently, sometimes needing force=True
-        submission_data = request.get_json(force=True)
-        raw_request = json.loads(submission_data.get('rawRequest', '{}'))
-        submission_id = submission_data.get('submissionID', 'UNKNOWN_SID')
-        company_name, deficiencies = analyze_submission(raw_request)
+        submission_data = request.form.get('rawRequest')
+        if not submission_data:
+            return jsonify({"status": "error", "message": "No rawRequest field"}), 400
+        
+        submission_data = json.loads(submission_data)
+        submission_id = request.form.get('submissionID', 'UNKNOWN_SID')
+
+        app.logger.info(f"Received submission {submission_id}")
+
+        company_name, deficiencies = analyze_submission(submission_data)
+        app.logger.info(f"Company: {company_name}, Deficiencies found: {len(deficiencies)}")
+        
+        # 1. Create the PDF
         pdf_path = create_deficiency_report(submission_id, company_name, deficiencies, recommendation_map)
-        print(f"Report generated: {pdf_path}")
-        return jsonify({"status": "success", "message": f"Report generated at {pdf_path}"}), 200
+        app.logger.info(f"Successfully generated PDF: {pdf_path}")
+        
+        # 2. Email the PDF
+        email_sent = send_pdf_email(pdf_path, company_name)
+        
+        message = f"Report generated. Email status: {'Success' if email_sent else 'Failed'}"
+        return jsonify({"status": "success", "message": message}), 200
+
     except Exception as e:
-        print(f"An error occurred: {e}")
+        app.logger.error(f"An unhandled error occurred: {e}", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/')
 def index():
-    return "Jotform PDF Generator is running."
+    return "Jotform PDF Generator with Email is running."
 
-# The host and port settings are important for Replit
-app.run(host='0.0.0.0', port=8080)
+if __name__ == '__main__':
+    # The 'gunicorn' server will run this on Render
+    app.run()
