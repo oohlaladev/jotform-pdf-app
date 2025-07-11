@@ -1,4 +1,4 @@
-# app.py (version with page layout fix)
+# app.py (version with modern design and layout fix)
 import os
 import json
 import datetime
@@ -101,51 +101,102 @@ def load_recommendations(file_path):
 recommendation_map = load_recommendations(RECOMMENDATIONS_CSV)
 
 
-# --- PDF Generation Class (MODIFIED) ---
+# --- PDF Generation Class (MODERN DESIGN) ---
 class PDF(FPDF):
     def header(self):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, 'C-TPAT Summary of Deficiencies & Recommended Actions', 0, 1, 'C')
-        self.ln(10)
+        # Blue header background
+        self.set_fill_color(25, 48, 89) # Dark Blue
+        self.rect(0, 0, 210, 20, 'F')
+        # Title
+        self.set_y(5)
+        self.set_font('Helvetica', 'B', 16)
+        self.set_text_color(255, 255, 255) # White
+        self.cell(0, 10, 'C-TPAT Summary of Deficiencies', 0, 1, 'C')
+        # Reset text color and position for page content
+        self.set_text_color(0, 0, 0)
+        self.set_y(25)
+
     def footer(self):
         self.set_y(-15)
-        self.set_font('Arial', 'I', 8)
+        self.set_font('Helvetica', 'I', 8)
+        self.set_text_color(128)
         self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
-    def chapter_title(self, title):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, title, 0, 1, 'L')
-        self.ln(5)
-    
-    # THIS FUNCTION IS UPDATED WITH THE LAYOUT FIX
+
+    def report_info(self, company_name, submission_id, report_date):
+        self.set_font('Helvetica', 'B', 12)
+        self.cell(40, 10, 'Company:', 0, 0)
+        self.set_font('Helvetica', '', 12)
+        self.cell(0, 10, company_name, 0, 1)
+
+        self.set_font('Helvetica', 'B', 12)
+        self.cell(40, 10, 'Submission ID:', 0, 0)
+        self.set_font('Helvetica', '', 12)
+        self.cell(0, 10, submission_id, 0, 1)
+
+        self.set_font('Helvetica', 'B', 12)
+        self.cell(40, 10, 'Report Date:', 0, 0)
+        self.set_font('Helvetica', '', 12)
+        self.cell(0, 10, report_date, 0, 1)
+        self.ln(10)
+
     def add_deficiency(self, question, answer, recommendation, suggestion):
         # Calculate available width based on page size and margins
-        page_width = self.w - self.l_margin - self.r_margin
+        content_width = self.w - self.l_margin - self.r_margin
 
-        # Deficiency and Answer
-        self.set_font('Arial', 'B', 11)
-        self.multi_cell(page_width, 7, f"Deficiency: {question}")
-        self.set_font('Arial', 'I', 10)
-        self.set_text_color(255, 0, 0)
-        self.multi_cell(page_width, 7, f"Answer: {answer}")
-        self.set_text_color(0, 0, 0)
+        # Store starting Y position
+        start_y = self.get_y()
         
-        # Recommended Action
-        self.set_font('Arial', 'B', 10)
-        self.multi_cell(page_width, 7, "Recommended Action:")
-        self.set_font('Arial', '', 10)
-        self.multi_cell(page_width, 6, recommendation)
-        self.ln(2)
+        # Draw a light gray background box for the entire deficiency block
+        # We will draw it last so we know the final height
+        
+        # --- Deficiency Title ---
+        self.set_font('Helvetica', 'B', 11)
+        self.set_text_color(40, 40, 40)
+        self.multi_cell(content_width, 6, f"DEFICIENCY: {question}")
+        self.ln(1)
+        
+        # --- Submitted Answer ---
+        self.set_font('Helvetica', 'I', 10)
+        self.set_text_color(200, 0, 0) # Red
+        self.multi_cell(content_width, 6, f"Submitted Answer: {answer}")
+        self.ln(4)
+        
+        # --- Recommended Action ---
+        self.set_font('Helvetica', 'B', 10)
+        self.set_text_color(0, 51, 102) # Dark Blue
+        self.cell(content_width, 6, "Recommended Action")
+        self.ln(5)
+        self.set_font('Helvetica', '', 10)
+        self.set_text_color(80, 80, 80)
+        self.multi_cell(content_width, 5, recommendation)
+        self.ln(4)
 
-        # Suggested Corrective Action
+        # --- Suggested Corrective Action ---
         if suggestion and suggestion.strip() and suggestion != "N/A":
-            self.set_font('Arial', 'B', 10)
-            self.multi_cell(page_width, 7, "Suggested Corrective Action:")
-            self.set_font('Arial', '', 10)
-            self.multi_cell(page_width, 6, suggestion)
+            self.set_font('Helvetica', 'B', 10)
+            self.set_text_color(0, 51, 102) # Dark Blue
+            self.cell(content_width, 6, "Suggested Corrective Action")
+            self.ln(5)
+            self.set_font('Helvetica', '', 10)
+            self.set_text_color(80, 80, 80)
+            self.multi_cell(content_width, 5, suggestion)
+            self.ln(2)
 
-        self.ln(6)
+        # Calculate height of the block
+        end_y = self.get_y()
+        block_height = end_y - start_y
 
-# --- Core Functions (MODIFIED) ---
+        # Draw the background rectangle now that we know the height
+        self.set_fill_color(240, 240, 240)
+        # Go back to the start and draw the rectangle behind the text
+        self.set_xy(self.l_margin, start_y - 2) # a little padding
+        self.cell(content_width, block_height + 4, "", 0, 0, 'L', fill=True)
+        # Move the cursor back to the end position
+        self.set_y(end_y)
+
+        self.ln(8) # Space between deficiency blocks
+
+# --- Core Functions ---
 def analyze_submission(data):
     deficiencies = []
     company_name = "N/A"
@@ -165,19 +216,10 @@ def create_deficiency_report(submission_id, company_name, deficiencies, recommen
     pdf = PDF()
     pdf.add_page()
     
-    # Calculate available width for the line separator
-    effective_page_width = pdf.w - pdf.l_margin - pdf.r_margin
-
-    pdf.chapter_title(f"Company: {company_name}")
-    pdf.chapter_title(f"Submission ID: {submission_id}")
     report_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    pdf.chapter_title(f"Report Date: {report_date}")
-    pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + effective_page_width, pdf.get_y())
-    pdf.ln(10)
+    pdf.report_info(company_name, submission_id, report_date)
+
     if deficiencies:
-        pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, f"Found {len(deficiencies)} Deficiencies", 0, 1, 'L')
-        pdf.ln(5)
         for item in deficiencies:
             rec_data = recommendations.get(item['question'], {
                 "action": "No specific recommendation was found.",
@@ -185,10 +227,10 @@ def create_deficiency_report(submission_id, company_name, deficiencies, recommen
             })
             pdf.add_deficiency(item['question'], item['answer'], rec_data['action'], rec_data['suggestion'])
     else:
-        pdf.set_font('Arial', 'B', 14)
-        pdf.set_text_color(0, 128, 0)
-        pdf.cell(0, 10, "No Deficiencies Found.", 0, 1, 'L')
-        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('Helvetica', 'B', 14)
+        pdf.set_text_color(0, 128, 0) # Green
+        pdf.cell(0, 10, "No Deficiencies Found.", 0, 1, 'C')
+
     file_path = os.path.join(PDF_OUTPUT_DIR, f"deficiency_report_{submission_id}.pdf")
     pdf.output(file_path)
     return file_path
@@ -203,7 +245,6 @@ def jotform_webhook():
         
         submission_data = json.loads(submission_data_str)
         submission_id = request.form.get('submissionID', 'UNKNOWN_SID')
-        app.logger.info(f"Received submission {submission_id}")
         company_name, deficiencies = analyze_submission(submission_data)
         pdf_path = create_deficiency_report(submission_id, company_name, deficiencies, recommendation_map)
         email_sent = send_pdf_email(pdf_path, company_name)
@@ -216,15 +257,12 @@ def jotform_webhook():
 # --- Test Route ---
 @app.route('/test')
 def test_email():
-    app.logger.info("--- Running Test ---")
-    
     dummy_submission_id = "DUMMY_TEST_001"
     dummy_data = {
         "answers": {
             "4": {"text": "Company Name", "answer": "Test Company Inc."},
-            "5": {"text": "Are background checks performed?", "answer": "Yes"},
             "6": {"text": "Is there a documented seal security program?", "answer": "No"},
-            "7": {"text": "Are shipping manifests verified against cargo?", "answer": "No"}
+            "7": {"text": "Are shipping manifests verified against cargo? This question is designed to be extra long to test the text wrapping functionality of the new PDF design.", "answer": "No"}
         }
     }
     
@@ -233,21 +271,14 @@ def test_email():
             "action": "Develop and implement a written seal security program that includes procedures for verifying the physical integrity of the seal upon affixing and receipt.",
             "suggestion": "Review the C-TPAT guidelines for high-security seals (ISO 17712). Ensure all personnel handling seals are trained on recognition of compromised seals."
         },
-        "Are shipping manifests verified against cargo?": {
-            "action": "Implement a mandatory procedure to verify that all shipping manifests, bills of lading, and other shipping documents are accurately and timely reflecting the cargo that is being loaded.",
-            "suggestion": "Consider using a two-person verification system for all outgoing shipments to ensure accuracy and accountability."
+        "Are shipping manifests verified against cargo? This question is designed to be extra long to test the text wrapping functionality of the new PDF design.": {
+            "action": "Implement a mandatory procedure to verify that all shipping documents accurately reflect the cargo being loaded. This includes bills of lading, manifests, and any other relevant transit documents.",
+            "suggestion": "Consider using a two-person verification system for all outgoing shipments. This creates accountability and reduces errors. Also, implement random spot-checks by a manager."
         }
     }
 
     company_name, deficiencies = analyze_submission(dummy_data)
-    if not deficiencies:
-        return "Test ran, but no deficiencies were found in the dummy data."
-        
-    app.logger.info(f"Test Company: {company_name}, Deficiencies found: {len(deficiencies)}")
-    
     pdf_path = create_deficiency_report(dummy_submission_id, company_name, deficiencies, dummy_recommendations)
-    app.logger.info(f"Test PDF generated: {pdf_path}")
-    
     email_sent = send_pdf_email(pdf_path, company_name)
     
     message = f"Test complete. Report for '{company_name}' generated. Email status: {'Success' if email_sent else 'Failed'}"
