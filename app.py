@@ -1,4 +1,4 @@
-# app.py (version with modern design and layout fix)
+# app.py (Final version with data visibility fix)
 import os
 import json
 import datetime
@@ -101,18 +101,15 @@ def load_recommendations(file_path):
 recommendation_map = load_recommendations(RECOMMENDATIONS_CSV)
 
 
-# --- PDF Generation Class (MODERN DESIGN) ---
+# --- PDF Generation Class (FIXED DESIGN) ---
 class PDF(FPDF):
     def header(self):
-        # Blue header background
         self.set_fill_color(25, 48, 89) # Dark Blue
         self.rect(0, 0, 210, 20, 'F')
-        # Title
         self.set_y(5)
         self.set_font('Helvetica', 'B', 16)
         self.set_text_color(255, 255, 255) # White
         self.cell(0, 10, 'C-TPAT Summary of Deficiencies', 0, 1, 'C')
-        # Reset text color and position for page content
         self.set_text_color(0, 0, 0)
         self.set_y(25)
 
@@ -139,16 +136,10 @@ class PDF(FPDF):
         self.cell(0, 10, report_date, 0, 1)
         self.ln(10)
 
+    # THIS IS THE CORRECTED FUNCTION
     def add_deficiency(self, question, answer, recommendation, suggestion):
-        # Calculate available width based on page size and margins
         content_width = self.w - self.l_margin - self.r_margin
 
-        # Store starting Y position
-        start_y = self.get_y()
-        
-        # Draw a light gray background box for the entire deficiency block
-        # We will draw it last so we know the final height
-        
         # --- Deficiency Title ---
         self.set_font('Helvetica', 'B', 11)
         self.set_text_color(40, 40, 40)
@@ -181,20 +172,10 @@ class PDF(FPDF):
             self.set_text_color(80, 80, 80)
             self.multi_cell(content_width, 5, suggestion)
             self.ln(2)
-
-        # Calculate height of the block
-        end_y = self.get_y()
-        block_height = end_y - start_y
-
-        # Draw the background rectangle now that we know the height
-        self.set_fill_color(240, 240, 240)
-        # Go back to the start and draw the rectangle behind the text
-        self.set_xy(self.l_margin, start_y - 2) # a little padding
-        self.cell(content_width, block_height + 4, "", 0, 0, 'L', fill=True)
-        # Move the cursor back to the end position
-        self.set_y(end_y)
-
-        self.ln(8) # Space between deficiency blocks
+        
+        # Use a line separator instead of a background box
+        self.line(self.get_x(), self.get_y(), self.get_x() + content_width, self.get_y())
+        self.ln(8)
 
 # --- Core Functions ---
 def analyze_submission(data):
