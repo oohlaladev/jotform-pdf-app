@@ -1,4 +1,4 @@
-# app.py (version with multi_cell fix)
+# app.py (version with page layout fix)
 import os
 import json
 import datetime
@@ -64,25 +64,35 @@ def load_recommendations(file_path):
     try:
         with open(file_path, mode='r', encoding='utf-8') as infile:
             reader = csv.reader(infile)
-            header_found = False
-            question_col_idx, action_col_idx = -1, -1
-            for header in reader:
-                try:
-                    question_col_idx = header.index('Question/Deficiency')
-                    action_col_idx = header.index('Recommended Action')
-                    header_found = True
+            header = []
+            for row in reader:
+                if 'Question/Deficiency' in row and 'Recommended Action' in row:
+                    header = row
                     break
-                except ValueError:
-                    continue
-            if not header_found:
+            
+            if not header:
                 app.logger.error("FATAL: Could not find required headers in CSV.")
                 return {}
+
+            question_col_idx = header.index('Question/Deficiency')
+            action_col_idx = header.index('Recommended Action')
+            
+            suggestion_col_idx = -1
+            try:
+                suggestion_col_idx = header.index('Suggested Corrective Action')
+            except ValueError:
+                app.logger.warning("Optional 'Suggested Corrective Action' column not found in CSV.")
+
             for row in reader:
                 if len(row) > max(question_col_idx, action_col_idx):
                     question = row[question_col_idx].strip()
                     action = row[action_col_idx].strip()
+                    suggestion = "N/A"
+                    if suggestion_col_idx != -1 and len(row) > suggestion_col_idx:
+                        suggestion = row[suggestion_col_idx].strip()
+
                     if question:
-                        recommendation_map[question] = action
+                        recommendation_map[question] = {"action": action, "suggestion": suggestion}
     except Exception as e:
         app.logger.error(f"An error occurred while loading the recommendations CSV: {e}")
         return {}
@@ -91,7 +101,7 @@ def load_recommendations(file_path):
 recommendation_map = load_recommendations(RECOMMENDATIONS_CSV)
 
 
-# --- PDF Generation Class ---
+# --- PDF Generation Class (MODIFIED) ---
 class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 12)
@@ -106,22 +116,36 @@ class PDF(FPDF):
         self.cell(0, 10, title, 0, 1, 'L')
         self.ln(5)
     
-    # --- THIS IS THE FIXED FUNCTION ---
-    def add_deficiency(self, question, answer, recommendation):
-        page_width = 190  # A safe width for A4 page size
+    # THIS FUNCTION IS UPDATED WITH THE LAYOUT FIX
+    def add_deficiency(self, question, answer, recommendation, suggestion):
+        # Calculate available width based on page size and margins
+        page_width = self.w - self.l_margin - self.r_margin
+
+        # Deficiency and Answer
         self.set_font('Arial', 'B', 11)
         self.multi_cell(page_width, 7, f"Deficiency: {question}")
         self.set_font('Arial', 'I', 10)
         self.set_text_color(255, 0, 0)
         self.multi_cell(page_width, 7, f"Answer: {answer}")
-        self.set_font('Arial', 'B', 10)
         self.set_text_color(0, 0, 0)
+        
+        # Recommended Action
+        self.set_font('Arial', 'B', 10)
         self.multi_cell(page_width, 7, "Recommended Action:")
         self.set_font('Arial', '', 10)
         self.multi_cell(page_width, 6, recommendation)
+        self.ln(2)
+
+        # Suggested Corrective Action
+        if suggestion and suggestion.strip() and suggestion != "N/A":
+            self.set_font('Arial', 'B', 10)
+            self.multi_cell(page_width, 7, "Suggested Corrective Action:")
+            self.set_font('Arial', '', 10)
+            self.multi_cell(page_width, 6, suggestion)
+
         self.ln(6)
 
-# --- Core Functions ---
+# --- Core Functions (MODIFIED) ---
 def analyze_submission(data):
     deficiencies = []
     company_name = "N/A"
@@ -136,97 +160,4 @@ def analyze_submission(data):
     return company_name, deficiencies
 
 def create_deficiency_report(submission_id, company_name, deficiencies, recommendations):
-    if not os.path.exists(PDF_OUTPUT_DIR):
-        os.makedirs(PDF_OUTPUT_DIR)
-    pdf = PDF()
-    pdf.add_page()
-    pdf.chapter_title(f"Company: {company_name}")
-    pdf.chapter_title(f"Submission ID: {submission_id}")
-    report_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    pdf.chapter_title(f"Report Date: {report_date}")
-    pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
-    pdf.ln(10)
-    if deficiencies:
-        pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, f"Found {len(deficiencies)} Deficiencies", 0, 1, 'L')
-        pdf.ln(5)
-        for item in deficiencies:
-            recommendation = recommendations.get(item['question'], "No specific recommendation was found in the provided CSV file.")
-            pdf.add_deficiency(item['question'], item['answer'], recommendation)
-    else:
-        pdf.set_font('Arial', 'B', 14)
-        pdf.set_text_color(0, 128, 0)
-        pdf.cell(0, 10, "No Deficiencies Found.", 0, 1, 'L')
-        pdf.set_text_color(0, 0, 0)
-    file_path = os.path.join(PDF_OUTPUT_DIR, f"deficiency_report_{submission_id}.pdf")
-    pdf.output(file_path)
-    return file_path
-
-# --- Main Webhook Endpoint ---
-@app.route('/webhook', methods=['POST'])
-def jotform_webhook():
-    try:
-        submission_data_str = request.form.get('rawRequest')
-        if not submission_data_str:
-            return jsonify({"status": "error", "message": "No rawRequest field"}), 400
-        
-        submission_data = json.loads(submission_data_str)
-        submission_id = request.form.get('submissionID', 'UNKNOWN_SID')
-        app.logger.info(f"Received submission {submission_id}")
-        company_name, deficiencies = analyze_submission(submission_data)
-        pdf_path = create_deficiency_report(submission_id, company_name, deficiencies, recommendation_map)
-        email_sent = send_pdf_email(pdf_path, company_name)
-        message = f"Report generated. Email status: {'Success' if email_sent else 'Failed'}"
-        return jsonify({"status": "success", "message": message}), 200
-    except Exception as e:
-        app.logger.error(f"An unhandled error occurred: {e}", exc_info=True)
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# --- NEW: Test Route ---
-@app.route('/test')
-def test_email():
-    app.logger.info("--- Running Test ---")
-    
-    dummy_submission_id = "DUMMY_TEST_001"
-    dummy_data = {
-        "answers": {
-            "4": {
-                "text": "Company Name",
-                "answer": "Test Company Inc."
-            },
-            "5": {
-                "text": "Are background checks performed?",
-                "answer": "Yes"
-            },
-            "6": {
-                "text": "Is there a documented seal security program?",
-                "answer": "No"
-            },
-            "7": {
-                "text": "Are shipping manifests verified against cargo?",
-                "answer": "No"
-            }
-        }
-    }
-    
-    company_name, deficiencies = analyze_submission(dummy_data)
-    if not deficiencies:
-        return "Test ran, but no deficiencies were found in the dummy data."
-        
-    app.logger.info(f"Test Company: {company_name}, Deficiencies found: {len(deficiencies)}")
-    
-    pdf_path = create_deficiency_report(dummy_submission_id, company_name, deficiencies, recommendation_map)
-    app.logger.info(f"Test PDF generated: {pdf_path}")
-    
-    email_sent = send_pdf_email(pdf_path, company_name)
-    
-    message = f"Test complete. Report for '{company_name}' generated. Email status: {'Success' if email_sent else 'Failed'}"
-    return message
-
-# --- Root URL ---
-@app.route('/')
-def index():
-    return "Jotform PDF Generator with Email is running."
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    if not os.path.exists
