@@ -1,4 +1,4 @@
-# app.py (version with email sending and test route)
+# app.py (version with multi_cell fix)
 import os
 import json
 import datetime
@@ -20,8 +20,6 @@ app = Flask(__name__)
 
 # --- Email Sending Function ---
 def send_pdf_email(pdf_path, company_name):
-    """Sends the generated PDF as an email attachment."""
-    # Fetch email configuration securely from environment variables
     sender_email = os.environ.get('SENDER_EMAIL')
     sender_password = os.environ.get('SENDER_PASSWORD')
     recipient_email = os.environ.get('RECIPIENT_EMAIL')
@@ -30,16 +28,13 @@ def send_pdf_email(pdf_path, company_name):
         app.logger.error("Email configuration is missing. Cannot send email.")
         return False
 
-    # Create the email message
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = recipient_email
     msg['Subject'] = f"C-TPAT Deficiency Report for {company_name}"
-
     body = "Please find the C-TPAT Summary of Deficiencies attached."
     msg.attach(MIMEText(body, 'plain'))
 
-    # Attach the PDF file
     try:
         with open(pdf_path, "rb") as f:
             attach = MIMEApplication(f.read(), _subtype="pdf")
@@ -49,7 +44,6 @@ def send_pdf_email(pdf_path, company_name):
         app.logger.error(f"Could not find PDF file at {pdf_path} to attach.")
         return False
 
-    # Send the email using Gmail's SMTP server
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
@@ -111,17 +105,20 @@ class PDF(FPDF):
         self.set_font('Arial', 'B', 12)
         self.cell(0, 10, title, 0, 1, 'L')
         self.ln(5)
+    
+    # --- THIS IS THE FIXED FUNCTION ---
     def add_deficiency(self, question, answer, recommendation):
+        page_width = 190  # A safe width for A4 page size
         self.set_font('Arial', 'B', 11)
-        self.multi_cell(0, 7, f"Deficiency: {question}")
+        self.multi_cell(page_width, 7, f"Deficiency: {question}")
         self.set_font('Arial', 'I', 10)
         self.set_text_color(255, 0, 0)
-        self.multi_cell(0, 7, f"Answer: {answer}")
+        self.multi_cell(page_width, 7, f"Answer: {answer}")
         self.set_font('Arial', 'B', 10)
         self.set_text_color(0, 0, 0)
-        self.multi_cell(0, 7, "Recommended Action:")
+        self.multi_cell(page_width, 7, "Recommended Action:")
         self.set_font('Arial', '', 10)
-        self.multi_cell(0, 6, recommendation)
+        self.multi_cell(page_width, 6, recommendation)
         self.ln(6)
 
 # --- Core Functions ---
@@ -188,10 +185,8 @@ def jotform_webhook():
 # --- NEW: Test Route ---
 @app.route('/test')
 def test_email():
-    """Generates a sample report from dummy data and emails it."""
     app.logger.info("--- Running Test ---")
     
-    # 1. Create dummy data that mimics a Jotform submission
     dummy_submission_id = "DUMMY_TEST_001"
     dummy_data = {
         "answers": {
@@ -214,21 +209,17 @@ def test_email():
         }
     }
     
-    # 2. Process the dummy data
     company_name, deficiencies = analyze_submission(dummy_data)
     if not deficiencies:
         return "Test ran, but no deficiencies were found in the dummy data."
         
     app.logger.info(f"Test Company: {company_name}, Deficiencies found: {len(deficiencies)}")
     
-    # 3. Create the PDF report
     pdf_path = create_deficiency_report(dummy_submission_id, company_name, deficiencies, recommendation_map)
     app.logger.info(f"Test PDF generated: {pdf_path}")
     
-    # 4. Email the PDF
     email_sent = send_pdf_email(pdf_path, company_name)
     
-    # 5. Return a message to the browser
     message = f"Test complete. Report for '{company_name}' generated. Email status: {'Success' if email_sent else 'Failed'}"
     return message
 
@@ -237,6 +228,5 @@ def test_email():
 def index():
     return "Jotform PDF Generator with Email is running."
 
-# This part is used for local testing but not by Render's gunicorn server
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
