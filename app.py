@@ -1,4 +1,4 @@
-# app.py (version with email sending)
+# app.py (version with email sending and test route)
 import os
 import json
 import datetime
@@ -51,7 +51,6 @@ def send_pdf_email(pdf_path, company_name):
 
     # Send the email using Gmail's SMTP server
     try:
-        # Using port 465 for SSL connection
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
             server.login(sender_email, sender_password)
@@ -65,6 +64,9 @@ def send_pdf_email(pdf_path, company_name):
 # --- Data Loading ---
 def load_recommendations(file_path):
     recommendation_map = {}
+    if not os.path.exists(file_path):
+        app.logger.error(f"FATAL: Recommendations CSV not found at '{file_path}'")
+        return {}
     try:
         with open(file_path, mode='r', encoding='utf-8') as infile:
             reader = csv.reader(infile)
@@ -87,15 +89,15 @@ def load_recommendations(file_path):
                     action = row[action_col_idx].strip()
                     if question:
                         recommendation_map[question] = action
-    except FileNotFoundError:
-        app.logger.error(f"FATAL: The recommendations file was not found at '{file_path}'")
+    except Exception as e:
+        app.logger.error(f"An error occurred while loading the recommendations CSV: {e}")
         return {}
     return recommendation_map
 
 recommendation_map = load_recommendations(RECOMMENDATIONS_CSV)
 
 
-# --- PDF Generation Class (No changes needed) ---
+# --- PDF Generation Class ---
 class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 12)
@@ -122,7 +124,7 @@ class PDF(FPDF):
         self.multi_cell(0, 6, recommendation)
         self.ln(6)
 
-# --- Core Functions (No changes needed) ---
+# --- Core Functions ---
 def analyze_submission(data):
     deficiencies = []
     company_name = "N/A"
@@ -131,7 +133,7 @@ def analyze_submission(data):
         question_text = answer_data.get('text', 'Unknown Question').strip()
         answer_value = answer_data.get('answer', '')
         if qid == '4':
-            company_name = answer_value if answer_value else "N/A"
+            company_name = answer_data.get('answer', "N/A")
         if isinstance(answer_value, str) and answer_value.lower() == 'no':
             deficiencies.append({"question": question_text, "answer": answer_value})
     return company_name, deficiencies
@@ -163,40 +165,78 @@ def create_deficiency_report(submission_id, company_name, deficiencies, recommen
     pdf.output(file_path)
     return file_path
 
-# --- Flask Webhook Endpoint (MODIFIED) ---
+# --- Main Webhook Endpoint ---
 @app.route('/webhook', methods=['POST'])
 def jotform_webhook():
     try:
-        submission_data = request.form.get('rawRequest')
-        if not submission_data:
+        submission_data_str = request.form.get('rawRequest')
+        if not submission_data_str:
             return jsonify({"status": "error", "message": "No rawRequest field"}), 400
         
-        submission_data = json.loads(submission_data)
+        submission_data = json.loads(submission_data_str)
         submission_id = request.form.get('submissionID', 'UNKNOWN_SID')
-
         app.logger.info(f"Received submission {submission_id}")
-
         company_name, deficiencies = analyze_submission(submission_data)
-        app.logger.info(f"Company: {company_name}, Deficiencies found: {len(deficiencies)}")
-        
-        # 1. Create the PDF
         pdf_path = create_deficiency_report(submission_id, company_name, deficiencies, recommendation_map)
-        app.logger.info(f"Successfully generated PDF: {pdf_path}")
-        
-        # 2. Email the PDF
         email_sent = send_pdf_email(pdf_path, company_name)
-        
         message = f"Report generated. Email status: {'Success' if email_sent else 'Failed'}"
         return jsonify({"status": "success", "message": message}), 200
-
     except Exception as e:
         app.logger.error(f"An unhandled error occurred: {e}", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# --- NEW: Test Route ---
+@app.route('/test')
+def test_email():
+    """Generates a sample report from dummy data and emails it."""
+    app.logger.info("--- Running Test ---")
+    
+    # 1. Create dummy data that mimics a Jotform submission
+    dummy_submission_id = "DUMMY_TEST_001"
+    dummy_data = {
+        "answers": {
+            "4": {
+                "text": "Company Name",
+                "answer": "Test Company Inc."
+            },
+            "5": {
+                "text": "Are background checks performed?",
+                "answer": "Yes"
+            },
+            "6": {
+                "text": "Is there a documented seal security program?",
+                "answer": "No"
+            },
+            "7": {
+                "text": "Are shipping manifests verified against cargo?",
+                "answer": "No"
+            }
+        }
+    }
+    
+    # 2. Process the dummy data
+    company_name, deficiencies = analyze_submission(dummy_data)
+    if not deficiencies:
+        return "Test ran, but no deficiencies were found in the dummy data."
+        
+    app.logger.info(f"Test Company: {company_name}, Deficiencies found: {len(deficiencies)}")
+    
+    # 3. Create the PDF report
+    pdf_path = create_deficiency_report(dummy_submission_id, company_name, deficiencies, recommendation_map)
+    app.logger.info(f"Test PDF generated: {pdf_path}")
+    
+    # 4. Email the PDF
+    email_sent = send_pdf_email(pdf_path, company_name)
+    
+    # 5. Return a message to the browser
+    message = f"Test complete. Report for '{company_name}' generated. Email status: {'Success' if email_sent else 'Failed'}"
+    return message
+
+# --- Root URL ---
 @app.route('/')
 def index():
     return "Jotform PDF Generator with Email is running."
 
+# This part is used for local testing but not by Render's gunicorn server
 if __name__ == '__main__':
-    # The 'gunicorn' server will run this on Render
-    app.run()
+    app.run(host='0.0.0.0', port=8080)
