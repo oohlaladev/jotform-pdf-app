@@ -183,7 +183,7 @@ Respond ONLY with valid JSON:
 }}"""
 
         response = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
+            model="claude-3.5-sonnet-20240620",
             max_tokens=800,
             temperature=0.1,
             messages=[{"role": "user", "content": prompt}]
