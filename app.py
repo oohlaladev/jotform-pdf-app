@@ -146,7 +146,7 @@ def claude_evaluate_ctpat_response(question, answer, ctpat_requirement):
         return None
     
     try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = anthropic.Client(api_key=ANTHROPIC_API_KEY)
         
         prompt = f"""You are a C-TPAT compliance expert with 15+ years of experience. Analyze this response for deficiencies.
 
@@ -1516,4 +1516,45 @@ if __name__ == '__main__':
     app.logger.info(f"Email: {'Configured' if os.environ.get('SENDER_EMAIL') else 'Not configured'}")
     
     app.run(host='0.0.0.0', port=8080, debug=False)
+
+    @app.route('/test-claude')
+def test_claude():
+    """Test Claude AI connection directly"""
+    if not ANTHROPIC_API_KEY:
+        return """
+        <h2>❌ Claude Test Failed</h2>
+        <p>ANTHROPIC_API_KEY not configured</p>
+        """
+    
+    try:
+        # Simple test question
+        result = claude_evaluate_ctpat_response(
+            "Are comprehensive cybersecurity policies in place?",
+            "Yes, our IT guy handles security",
+            "IV. Cybersecurity"
+        )
+        
+        if result:
+            return f"""
+            <h2>✅ Claude Test Successful</h2>
+            <p><strong>Question:</strong> Are comprehensive cybersecurity policies in place?</p>
+            <p><strong>Answer:</strong> Yes, our IT guy handles security</p>
+            <p><strong>Claude Result:</strong></p>
+            <pre style="background: #f8f9fa; padding: 15px; border-radius: 8px;">{json.dumps(result, indent=2)}</pre>
+            <p><a href="/claude-demo">Try Full Demo</a></p>
+            """
+        else:
+            return """
+            <h2>⚠️ Claude Test Failed</h2>
+            <p>API call failed - check logs for details</p>
+            """
+            
+    except Exception as e:
+        return f"""
+        <h2>❌ Claude Test Error</h2>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><strong>Traceback:</strong></p>
+        <pre style="background: #f8f9fa; padding: 15px;">{traceback.format_exc()}</pre>
+        """
+
 
