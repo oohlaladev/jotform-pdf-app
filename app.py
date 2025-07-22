@@ -333,7 +333,7 @@ def smart_hybrid_analysis(question, answer, ctpat_requirement):
     }
 
 def analyze_with_ai(data):
-    """AI-powered submission analysis"""
+    """AI-powered submission analysis with corrected tracking"""
     deficiencies = []
     company_name = "Unknown Company"
     analysis_summary = {
@@ -356,13 +356,14 @@ def analyze_with_ai(data):
         # Extract company name
         if 'company' in question_text.lower() and ('name' in question_text.lower() or len(question_text) < 50):
             company_name = answer_data.get('answer', company_name)
+            analysis_summary["total_questions"] -= 1  # Don't count company name as analysis question
             continue
         
         # Get C-TPAT category
         ctpat_category = match_question_to_ctpat_requirement(question_text)
         
-        # Hybrid analysis
-        analysis_result = smart_hybrid_analysis(question_text, answer_value, ctpat_category)
+        # FORCE AI ANALYSIS FOR DEMO - Remove cost-saving logic temporarily
+        analysis_result = smart_hybrid_analysis_demo(question_text, answer_value, ctpat_category)
         
         # Track analysis method
         if "Claude" in analysis_result.get("method", ""):
@@ -392,6 +393,45 @@ def analyze_with_ai(data):
             })
     
     return company_name, deficiencies, analysis_summary
+def smart_hybrid_analysis_demo(question, answer, ctpat_requirement):
+    """Modified analysis that forces AI usage for demo purposes"""
+    
+    # First, run rule-based check
+    rule_deficient, rule_reason = enhanced_deficiency_detection(question, answer)
+    
+    # FORCE AI ANALYSIS FOR ALL QUESTIONS IN DEMO (instead of selective)
+    if ANTHROPIC_API_KEY:
+        app.logger.info(f"Sending to Claude: {question[:50]}...")
+        claude_result = claude_evaluate_ctpat_response(question, answer, ctpat_requirement)
+        
+        if claude_result:
+            app.logger.info(f"Claude response received for: {question[:30]}...")
+            return {
+                "is_deficient": claude_result.get("is_deficient", rule_deficient),
+                "confidence": claude_result.get("confidence_score", 85),
+                "severity": claude_result.get("severity", "medium"),
+                "method": "Claude AI Analysis",
+                "explanation": claude_result.get("explanation", ""),
+                "corrective_action": claude_result.get("corrective_action", ""),
+                "specific_issues": claude_result.get("specific_issues", []),
+                "red_flags": claude_result.get("red_flags", []),
+                "deficiency_type": claude_result.get("deficiency_type", "unknown"),
+                "rule_check": f"Rules: {rule_reason}" if rule_deficient else "Rules: Passed"
+            }
+        else:
+            app.logger.warning(f"Claude analysis failed for: {question[:30]}...")
+    
+    # Fallback to enhanced rules
+    return {
+        "is_deficient": rule_deficient,
+        "confidence": 85 if rule_deficient else 75,
+        "method": "Enhanced Rule-Based",
+        "explanation": rule_reason,
+        "severity": "high" if rule_deficient else "none",
+        "corrective_action": "Implement appropriate C-TPAT security measures for this requirement.",
+        "specific_issues": [rule_reason] if rule_deficient else [],
+        "red_flags": []
+    }
 
 # --- Advanced PDF Generation ---
 class AdvancedCTPATPDF(FPDF):
