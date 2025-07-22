@@ -393,6 +393,7 @@ def analyze_with_ai(data):
             })
     
     return company_name, deficiencies, analysis_summary
+
 def smart_hybrid_analysis_demo(question, answer, ctpat_requirement):
     """Modified analysis that forces AI usage for demo purposes"""
     
@@ -568,7 +569,7 @@ class AdvancedCTPATPDF(FPDF):
             self.set_font('Arial', 'B', 8)
             self.set_text_color(255, 255, 255)
             self.set_fill_color(102, 51, 153)
-            self.cell(25, 4, '🧠 AI ANALYSIS', 0, 0, 'C', True)
+            self.cell(25, 4, 'AI ANALYSIS', 0, 0, 'C', True)
             self.set_fill_color(*bg_color)
             self.set_text_color(0, 0, 0)
             self.cell(10, 4, '', 0, 0)
@@ -622,7 +623,7 @@ class AdvancedCTPATPDF(FPDF):
         if deficiency.get('red_flags'):
             self.set_font('Arial', 'B', 9)
             self.set_text_color(200, 0, 0)
-            self.cell(content_width, 4, "🚩 RED FLAGS:")
+            self.cell(content_width, 4, "RED FLAGS:")
             self.ln(4)
             self.set_font('Arial', '', 9)
             self.set_text_color(150, 0, 0)
@@ -706,7 +707,7 @@ def create_ai_enhanced_report(submission_id, company_name, deficiencies, analysi
         # No deficiencies
         pdf.set_font('Arial', 'B', 16)
         pdf.set_text_color(0, 150, 0)
-        pdf.cell(0, 15, "🎉 EXCELLENT COMPLIANCE ACHIEVED!", 0, 1, 'C')
+        pdf.cell(0, 15, "EXCELLENT COMPLIANCE ACHIEVED!", 0, 1, 'C')
         
         pdf.set_font('Arial', '', 12)
         pdf.set_text_color(60, 60, 60)
@@ -813,6 +814,74 @@ def index():
         """
     except Exception as e:
         return f"<h2>System Error</h2><p>{str(e)}</p>"
+
+@app.route('/test-claude')
+def test_claude():
+    """Test Claude AI connection directly"""
+    if not ANTHROPIC_API_KEY:
+        return """
+        <div style="padding: 40px; text-align: center; font-family: Arial, sans-serif;">
+            <h2 style="color: #dc3545;">❌ Claude Test Failed</h2>
+            <p>ANTHROPIC_API_KEY not configured</p>
+            <div style="margin: 30px 0;">
+                <a href="/" style="background: #007cba; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px;">Back to Dashboard</a>
+            </div>
+        </div>
+        """
+    
+    try:
+        # Simple test question
+        result = claude_evaluate_ctpat_response(
+            "Are comprehensive cybersecurity policies in place?",
+            "Yes, our IT guy handles security",
+            "IV. Cybersecurity"
+        )
+        
+        if result:
+            return f"""
+            <div style="padding: 40px; font-family: Arial, sans-serif;">
+                <h2 style="color: #28a745;">✅ Claude Test Successful</h2>
+                <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p><strong>Question:</strong> Are comprehensive cybersecurity policies in place?</p>
+                    <p><strong>Answer:</strong> Yes, our IT guy handles security</p>
+                </div>
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h3>Claude Result:</h3>
+                    <pre style="white-space: pre-wrap;">{json.dumps(result, indent=2)}</pre>
+                </div>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="/claude-demo" style="background: linear-gradient(45deg, #667eea, #764ba2); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; margin: 10px;">🧠 Try Full Demo</a>
+                    <a href="/" style="background: #007cba; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; margin: 10px;">← Back to Dashboard</a>
+                </div>
+            </div>
+            """
+        else:
+            return """
+            <div style="padding: 40px; text-align: center; font-family: Arial, sans-serif;">
+                <h2 style="color: #ffc107;">⚠️ Claude Test Failed</h2>
+                <p>API call failed - check logs for details</p>
+                <div style="margin: 30px 0;">
+                    <a href="/" style="background: #007cba; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px;">Back to Dashboard</a>
+                </div>
+            </div>
+            """
+            
+    except Exception as e:
+        return f"""
+        <div style="padding: 40px; font-family: Arial, sans-serif;">
+            <h2 style="color: #dc3545;">❌ Claude Test Error</h2>
+            <div style="background: #f8d7da; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>Error:</strong> {str(e)}</p>
+            </div>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <strong>Traceback:</strong>
+                <pre style="margin-top: 10px;">{traceback.format_exc()}</pre>
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="/" style="background: #007cba; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px;">Back to Dashboard</a>
+            </div>
+        </div>
+        """
 
 @app.route('/claude-demo')
 def claude_demo():
@@ -1065,7 +1134,6 @@ def claude_demo():
         </div>
         """
 
-# Keep existing routes (demo, test, health, webhook, download routes) with minor updates
 @app.route('/demo')  
 def demo():
     """Rule-based demo for comparison"""
@@ -1099,7 +1167,7 @@ def demo():
         return f"""
         <div style="padding: 40px; font-family: Arial, sans-serif; background: linear-gradient(135deg, #28a745, #20c997); min-height: 100vh;">
             <div style="background: rgba(255,255,255,0.95); padding: 40px; border-radius: 20px; max-width: 800px; margin: 0 auto;">
-                <h1 style="text-align: center; color: #333;">📊 Rule-Based C-TPAT Analysis</h1>
+                                <h1 style="text-align: center; color: #333;">📊 Rule-Based C-TPAT Analysis</h1>
                 <div style="background: #d4edda; padding: 20px; border-radius: 10px; text-align: center; margin: 20px 0;">
                     <h3 style="color: #155724; margin: 0;">✅ Analysis Complete - {company_name}</h3>
                     <p>Rule-based system found {len(deficiencies)} deficiencies</p>
@@ -1516,45 +1584,4 @@ if __name__ == '__main__':
     app.logger.info(f"Email: {'Configured' if os.environ.get('SENDER_EMAIL') else 'Not configured'}")
     
     app.run(host='0.0.0.0', port=8080, debug=False)
-
-    @app.route('/test-claude')
-def test_claude():
-    """Test Claude AI connection directly"""
-    if not ANTHROPIC_API_KEY:
-        return """
-        <h2>❌ Claude Test Failed</h2>
-        <p>ANTHROPIC_API_KEY not configured</p>
-        """
-    
-    try:
-        # Simple test question
-        result = claude_evaluate_ctpat_response(
-            "Are comprehensive cybersecurity policies in place?",
-            "Yes, our IT guy handles security",
-            "IV. Cybersecurity"
-        )
-        
-        if result:
-            return f"""
-            <h2>✅ Claude Test Successful</h2>
-            <p><strong>Question:</strong> Are comprehensive cybersecurity policies in place?</p>
-            <p><strong>Answer:</strong> Yes, our IT guy handles security</p>
-            <p><strong>Claude Result:</strong></p>
-            <pre style="background: #f8f9fa; padding: 15px; border-radius: 8px;">{json.dumps(result, indent=2)}</pre>
-            <p><a href="/claude-demo">Try Full Demo</a></p>
-            """
-        else:
-            return """
-            <h2>⚠️ Claude Test Failed</h2>
-            <p>API call failed - check logs for details</p>
-            """
-            
-    except Exception as e:
-        return f"""
-        <h2>❌ Claude Test Error</h2>
-        <p><strong>Error:</strong> {str(e)}</p>
-        <p><strong>Traceback:</strong></p>
-        <pre style="background: #f8f9fa; padding: 15px;">{traceback.format_exc()}</pre>
-        """
-
 
