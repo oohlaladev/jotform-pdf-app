@@ -209,7 +209,7 @@ Respond ONLY with valid JSON:
 
         # Use a current model name that works with your Anthropic API version
         response = client.messages.create(
-            model="claude-3-opus-20240229",
+            model="claude-3",
             max_tokens=800,
             temperature=0.1,
             messages=[{"role": "user", "content": prompt}]
