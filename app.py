@@ -917,9 +917,9 @@ def admin_dashboard():
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>🧠 C-TPAT AI-Powered Analysis System - ADMIN VIEW</h1>
-                    <div class="ai-badge">POWERED BY ANTHROPIC CLAUDE</div>
-                    <div class="status ready">🚀 SYSTEM OPERATIONAL</div>
+                    <h1>🛡️ C-TPAT Analysis System</h1>
+                    <div class="ai-badge">World Wise Consulting</div>
+                    <div class="status ready">🟢 SYSTEM OPERATIONAL</div>
                     <p><strong>Advanced AI Compliance Analysis Ready for Production</strong></p>
                 </div>
                 
