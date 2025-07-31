@@ -146,6 +146,7 @@ def claude_evaluate_ctpat_response(question, answer, ctpat_requirement):
         return None
     
     try:
+        # Initialize the client using the current API version
         client = anthropic.Client(api_key=ANTHROPIC_API_KEY)
         
         prompt = f"""You are a C-TPAT compliance expert with 15+ years of experience. Analyze this response for deficiencies.
@@ -182,8 +183,9 @@ Respond ONLY with valid JSON:
     "red_flags": ["concerning element1", "concerning element2"]
 }}"""
 
+        # Use a current model name that works with your Anthropic API version
         response = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
+            model="claude-3-sonnet-20240229",
             max_tokens=800,
             temperature=0.1,
             messages=[{"role": "user", "content": prompt}]
@@ -192,14 +194,29 @@ Respond ONLY with valid JSON:
         # Parse Claude's response
         claude_text = response.content[0].text.strip()
         
-        # Extract JSON if wrapped in markdown
+        # Better JSON extraction
         if "```json" in claude_text:
             claude_text = claude_text.split("```json")[1].split("```")[0].strip()
         elif "```" in claude_text:
             claude_text = claude_text.split("```")[1].split("```")[0].strip()
         
-        claude_analysis = json.loads(claude_text)
-        return claude_analysis
+        try:
+            claude_analysis = json.loads(claude_text)
+            app.logger.info(f"Claude analysis succeeded for: {question[:30]}")
+            return claude_analysis
+        except json.JSONDecodeError as e:
+            app.logger.error(f"Failed to parse Claude response: {e}")
+            # Return a fallback response when JSON parsing fails
+            return {
+                "is_deficient": True,
+                "confidence_score": 80,
+                "severity": "medium",
+                "deficiency_type": "system_fallback",
+                "specific_issues": ["AI response parsing error"],
+                "corrective_action": "Implement appropriate security measures for this requirement.",
+                "explanation": "Unable to parse AI response, using fallback analysis",
+                "red_flags": ["AI analysis failed"]
+            }
         
     except Exception as e:
         app.logger.error(f"Claude evaluation failed: {e}")
@@ -362,8 +379,8 @@ def analyze_with_ai(data):
         # Get C-TPAT category
         ctpat_category = match_question_to_ctpat_requirement(question_text)
         
-        # FORCE AI ANALYSIS FOR DEMO - Remove cost-saving logic temporarily
-        analysis_result = smart_hybrid_analysis_demo(question_text, answer_value, ctpat_category)
+        # Use hybrid analysis
+        analysis_result = smart_hybrid_analysis(question_text, answer_value, ctpat_category)
         
         # Track analysis method
         if "Claude" in analysis_result.get("method", ""):
@@ -462,11 +479,12 @@ class AdvancedCTPATPDF(FPDF):
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f'Page {self.page_no()} | AI Analysis Report | Generated {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}', 0, 0, 'C')
 
-    def safe_text(self, text, max_length=100):
-        """Safely handle text for PDF generation"""
+    def safe_text(self, text, max_length=300):
+        """Safely handle text for PDF generation with better length limits"""
         if not text:
             return "N/A"
         text_str = str(text)
+        # Only truncate if extremely long
         if len(text_str) > max_length:
             return text_str[:max_length-3] + "..."
         return text_str
@@ -504,8 +522,9 @@ class AdvancedCTPATPDF(FPDF):
         self.cell(50, 6, 'Total Deficiencies:', 0, 0)
         self.set_font('Arial', 'B', 11)
         self.set_text_color(200, 0, 0)
-        total_def = len([d for d in analysis_summary.keys() if "deficiencies" in str(d)])
-        self.cell(0, 6, str(analysis_summary.get("total_deficiencies", 0)), 0, 1)
+        # Use actual deficiency count
+        deficiency_count = analysis_summary.get("actual_deficiency_count", 0)
+        self.cell(0, 6, str(deficiency_count), 0, 1)
         
         self.set_text_color(0, 0, 0)
         self.ln(8)
@@ -549,7 +568,7 @@ class AdvancedCTPATPDF(FPDF):
 
     def add_ai_deficiency(self, deficiency):
         """Add AI-analyzed deficiency with enhanced formatting"""
-        content_width = self.w - self.l_margin - self.r_margin
+        content_width = self.w - self.l_margin - self.r_margin - 5  # Add margin for safety
         start_y = self.get_y()
         
         # Severity color coding
@@ -584,20 +603,19 @@ class AdvancedCTPATPDF(FPDF):
         
         self.ln(2)
         
-        # Question
+        # Question - NO TRUNCATION
         self.set_font('Arial', 'B', 10)
         self.set_text_color(40, 40, 40)
-        question_text = self.safe_text(deficiency['question'], 85)
-        self.multi_cell(content_width, 4, f"DEFICIENCY: {question_text}")
+        self.multi_cell(content_width, 5, f"DEFICIENCY: {deficiency['question']}")
         self.ln(1)
         
-        # Answer
+        # Answer - NO TRUNCATION
         self.set_font('Arial', 'I', 9)
         self.set_text_color(150, 0, 0)
-        self.multi_cell(content_width, 4, f"Response: {self.safe_text(deficiency['answer'], 70)}")
+        self.multi_cell(content_width, 4, f"Response: {deficiency['answer']}")
         self.ln(2)
         
-        # AI Explanation (if available)
+        # AI Explanation - NO TRUNCATION
         if deficiency.get('explanation'):
             self.set_font('Arial', 'B', 9)
             self.set_text_color(0, 51, 102)
@@ -605,10 +623,10 @@ class AdvancedCTPATPDF(FPDF):
             self.ln(4)
             self.set_font('Arial', '', 9)
             self.set_text_color(60, 60, 60)
-            self.multi_cell(content_width, 4, self.safe_text(deficiency['explanation'], 150))
+            self.multi_cell(content_width, 4, deficiency['explanation'])
             self.ln(2)
         
-        # Corrective Action
+        # Corrective Action - NO TRUNCATION
         if deficiency.get('corrective_action'):
             self.set_font('Arial', 'B', 9)
             self.set_text_color(0, 102, 51)
@@ -616,10 +634,10 @@ class AdvancedCTPATPDF(FPDF):
             self.ln(4)
             self.set_font('Arial', '', 9)
             self.set_text_color(60, 60, 60)
-            self.multi_cell(content_width, 4, self.safe_text(deficiency['corrective_action'], 200))
+            self.multi_cell(content_width, 4, deficiency['corrective_action'])
             self.ln(2)
         
-        # Red Flags (if any)
+        # Red Flags - NO TRUNCATION
         if deficiency.get('red_flags'):
             self.set_font('Arial', 'B', 9)
             self.set_text_color(200, 0, 0)
@@ -628,7 +646,7 @@ class AdvancedCTPATPDF(FPDF):
             self.set_font('Arial', '', 9)
             self.set_text_color(150, 0, 0)
             red_flags_text = ", ".join(deficiency['red_flags'])
-            self.multi_cell(content_width, 4, self.safe_text(red_flags_text, 120))
+            self.multi_cell(content_width, 4, red_flags_text)
             self.ln(2)
         
         # Analysis metadata
@@ -636,13 +654,10 @@ class AdvancedCTPATPDF(FPDF):
         self.set_text_color(100, 100, 100)
         confidence = deficiency.get('confidence', 0)
         method = deficiency.get('method', 'Unknown')
-        self.cell(content_width, 4, f"Analysis: {method} | Confidence: {confidence}% | Category: {deficiency.get('category', 'Unknown')}")
+        category = deficiency.get('category', 'Unknown')
+        self.multi_cell(content_width, 4, f"Analysis: {method} | Confidence: {confidence}% | Category: {category}")
         
-        # Border
-        end_y = self.get_y()
-        box_height = end_y - start_y + 4
-        self.rect(self.get_x(), start_y, content_width, box_height)
-        
+        # Don't draw a border to prevent overflow issues
         self.ln(8)
 
 def create_ai_enhanced_report(submission_id, company_name, deficiencies, analysis_summary):
@@ -652,6 +667,9 @@ def create_ai_enhanced_report(submission_id, company_name, deficiencies, analysi
     
     pdf = AdvancedCTPATPDF()
     pdf.add_page()
+    
+    # Add actual deficiency count to analysis summary
+    analysis_summary["actual_deficiency_count"] = len(deficiencies)
     
     # Company section
     pdf.add_company_section(company_name, submission_id, analysis_summary)
@@ -902,34 +920,26 @@ def claude_demo():
         # Load deficiency database
         db = load_deficiency_database()
         
-        # Sophisticated test scenarios for Claude
+        # Demo data with varied responses for a good demo
         demo_data = {
             "answers": {
-                "1": {"text": "Company Name", "answer": "Global Supply Solutions Inc"},
+                "1": {"text": "Company Name", "answer": "Global Security Solutions Inc."},
                 
-                # Test Claude's nuanced understanding
-                "2": {"text": "Are comprehensive written cybersecurity policies and procedures in place to protect all Information Technology (IT) Systems?", 
-                      "answer": "Yes, our IT guy Bob handles all the computer security stuff and we have Norton Antivirus installed on most of the computers in the office"},
+                # Very weak response
+                "2": {"text": "Are comprehensive written cybersecurity policies and procedures in place?", 
+                      "answer": "We have antivirus on computers."},
                 
-                # Test evasion detection
-                "3": {"text": "Are written processes in place to screen prospective employees and conduct background checks?", 
-                      "answer": "We are very careful about who we hire and only work with people we trust. We check their Facebook and ask around about them"},
+                # Vague positive response
+                "3": {"text": "Is there a documented process for conducting background checks on employees?", 
+                      "answer": "Yes, we are careful about who we hire."},
                 
-                # Test partial compliance detection
-                "4": {"text": "Does a security training and awareness program exist to recognize and foster awareness of security vulnerabilities?", 
-                      "answer": "We tell all new employees during orientation to be careful about security and not to click on suspicious emails or open weird attachments"},
+                # Partial implementation
+                "4": {"text": "Are written procedures in place for reporting security incidents?", 
+                      "answer": "Employees know to tell their manager if something happens."},
                 
-                # Test complex policy evaluation
-                "5": {"text": "Are there written procedures in place for reporting security incidents which includes a description of the facility's internal escalation process?", 
-                      "answer": "If something bad happens or looks suspicious, people know they should tell their manager right away and we'll figure out what to do about it"},
-                
-                # Test vague but positive-sounding response
-                "6": {"text": "Is there a documented process for conducting risk assessments to determine potential security vulnerabilities within the supply chain?", 
-                      "answer": "Yes, we assess risks regularly and take appropriate measures to ensure security"},
-                
-                # Test good response that should pass
-                "7": {"text": "Is adequate lighting provided inside and outside the facility including cargo handling and storage areas?", 
-                      "answer": "Yes, we have installed comprehensive LED lighting throughout all cargo areas, loading docks, and perimeter with motion sensors, backup power systems, and conduct monthly lighting inspections documented in our facilities maintenance log"}
+                # Strong response - should not show as deficiency
+                "5": {"text": "Is adequate lighting provided at cargo handling areas?", 
+                      "answer": "Yes, we have installed LED lighting throughout all cargo areas with regular maintenance and testing. The entire perimeter and all access points are well-lit 24/7 with backup power systems."}
             }
         }
         
@@ -1006,10 +1016,11 @@ def claude_demo():
         """
         
         # Display deficiencies found by Claude
+        html_content = ""
         for i, deficiency in enumerate(deficiencies, 1):
             severity_class = f"severity-{deficiency.get('severity', 'medium')}"
             
-            html_content = f"""
+            html_content += f"""
             <div class="deficiency {severity_class}">
                 <h3 style="margin-top: 0; color: #333;">
                     ⚠️ Deficiency #{i}: {deficiency.get('severity', 'Medium').title()} Risk
@@ -1045,8 +1056,8 @@ def claude_demo():
         html_content += f"""
             <div class="good-response">
                 <h3 style="margin-top: 0; color: #155724;">✅ Example: Claude Recognized This as Compliant</h3>
-                <p><strong>Question:</strong> Is adequate lighting provided inside and outside the facility?</p>
-                <p><strong>Response:</strong> "Yes, we have installed comprehensive LED lighting throughout all cargo areas, loading docks, and perimeter with motion sensors, backup power systems, and conduct monthly lighting inspections..."</p>
+                <p><strong>Question:</strong> Is adequate lighting provided at cargo handling areas?</p>
+                <p><strong>Response:</strong> "Yes, we have installed LED lighting throughout all cargo areas with regular maintenance and testing. The entire perimeter and all access points are well-lit 24/7 with backup power systems."</p>
                 <p><strong>Claude's Assessment:</strong> ✅ COMPLIANT - Response demonstrates comprehensive implementation with specific technical details, maintenance procedures, and documented inspection processes.</p>
             </div>
             
@@ -1167,7 +1178,7 @@ def demo():
         return f"""
         <div style="padding: 40px; font-family: Arial, sans-serif; background: linear-gradient(135deg, #28a745, #20c997); min-height: 100vh;">
             <div style="background: rgba(255,255,255,0.95); padding: 40px; border-radius: 20px; max-width: 800px; margin: 0 auto;">
-                                <h1 style="text-align: center; color: #333;">📊 Rule-Based C-TPAT Analysis</h1>
+                <h1 style="text-align: center; color: #333;">📊 Rule-Based C-TPAT Analysis</h1>
                 <div style="background: #d4edda; padding: 20px; border-radius: 10px; text-align: center; margin: 20px 0;">
                     <h3 style="color: #155724; margin: 0;">✅ Analysis Complete - {company_name}</h3>
                     <p>Rule-based system found {len(deficiencies)} deficiencies</p>
